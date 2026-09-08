@@ -1,6 +1,7 @@
-# Colombina — Bot Discord
+# Bot Discord
 
-Bot Discord unifié du serveur de Lia : économie, progression (XP/levels), RPG, casino, modération et assistants IA. Développé en Python avec `discord.py` 2.x, SQLAlchemy 2 (async) et PostgreSQL.
+Bot Discord unifié : économie, progression (XP/levels), RPG, casino, modération et assistants IA. 
+Développé en Python, SQLAlchemy 2 (async) et PostgreSQL.
 
 ## Fonctionnalités
 
@@ -54,10 +55,10 @@ Au démarrage, le bot exécute les migrations Alembic (voir infra partagée ci-d
 
 ### 1. Créer son fichier .env
 
-Le dépôt contient un fichier `.env.example` **volontairement vide** : c'est un simple marqueur. Le vrai fichier `.env` n'est **jamais** versionné (il est dans le `.gitignore`) car il contient tes secrets.
+Le dépôt contient un fichier `.env.example` : c'est un simple marqueur. Le vrai fichier `.env` n'est **jamais** versionné (il est dans le `.gitignore`) car il contient tes secrets.
 
 ```bash
-# Linux / macOS — copie (ou renommage : mv .env.example .env)
+# Linux / macOS
 cp .env.example .env
 
 # Windows (PowerShell)
@@ -138,7 +139,7 @@ Le bot applique les migrations Alembic au démarrage puis se connecte à Discord
 
 ## Conteneurisation
 
-Le dossier contient un `Dockerfile` et un `docker-compose.yml`. En production, colombina est construit depuis le workspace de l'écosystème Discord, dont le contexte parent fournit le dossier partagé `shared/` (migrations Alembic communes à tous les bots — colombina, zero-two, makima, giani, yoru). L'`entrypoint.sh` lance `alembic upgrade head` dans ce dossier partagé avant de démarrer `main.py`.
+Le dossier contient un `Dockerfile` et un `docker-compose.yml`. En production, le bot est construit depuis le workspace de l'écosystème Discord, dont le contexte parent fournit le dossier partagé `shared/` (migrations Alembic communes à tous les bots — colombina, zero-two, makima, giani, yoru). L'`entrypoint.sh` lance `alembic upgrade head` dans ce dossier partagé avant de démarrer `main.py`.
 
 Ce dépôt ne versionne que le code du bot colombina lui-même ; l'infra partagée (Alembic, schémas multi-bots, Postgres/Redis communs) reste privée.
 
