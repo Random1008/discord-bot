@@ -49,7 +49,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-Au démarrage, le bot exécute les migrations Alembic (voir infra partagée ci-dessous), puis se connecte à Discord.
+Au démarrage, le bot exécute les migrations Alembic (voir « Conteneurisation » ci-dessous), puis se connecte à Discord.
 
 ## Configuration (.env) — tutoriel
 
@@ -139,10 +139,18 @@ Le bot applique les migrations Alembic au démarrage puis se connecte à Discord
 
 ## Conteneurisation
 
-Le dossier contient un `Dockerfile` et un `docker-compose.yml`. En production, le bot est construit depuis le workspace de l'écosystème Discord, dont le contexte parent fournit le dossier partagé `shared/` (migrations Alembic communes à tous les bots — colombina, zero-two, makima, giani, yoru). L'`entrypoint.sh` lance `alembic upgrade head` dans ce dossier partagé avant de démarrer `main.py`.
+Le dépôt contient un `Dockerfile` et un `docker-compose.yml` :
 
-Ce dépôt ne versionne que le code du bot colombina lui-même ; l'infra partagée (Alembic, schémas multi-bots, Postgres/Redis communs) reste privée.
+- `Dockerfile` : image `python:3.12-slim`, installe `requirements.txt`, copie le code et démarre via `entrypoint.sh`.
+- `entrypoint.sh` : applique les migrations Alembic (`alembic upgrade head`) puis lance `main.py`.
+- `docker-compose.yml` : définit le service `bot`, branché sur un réseau Docker externe (`shared_backend`) avec des services `postgres` et `redis` déjà présents.
+
+Ces fichiers correspondent au déploiement d'origine de ce bot : le contexte de build y inclut un paquet compagnon `shared/` — **non publié dans ce dépôt public** — qui fournit `shared.db.engine` (session SQLAlchemy) et les fichiers de migration Alembic. Pour déployer ce bot chez toi :
+
+1. fournis un paquet `shared/` équivalent, ou remplace l'import `shared.db.engine` dans `database/engine.py` par ton propre engine SQLAlchemy ;
+2. crée le schéma de ta base — avec tes propres migrations Alembic, ou directement depuis les modèles SQLAlchemy (`models/`) ;
+3. adapte `docker-compose.yml` (réseau, noms de services), ou lance simplement `python main.py` avec un `.env` rempli.
 
 ## Environnement
 
-Toute la configuration passe par des variables d'environnement dans `.env` (voir le tutoriel ci-dessus). Aucun secret ni aucune valeur réelle (IDs de serveur, tokens) n'est versionné : `.env` est ignoré par git et `.env.example` est un marqueur vide.
+La configuration passe exclusivement par des variables d'environnement dans `.env` (voir le tutoriel plus haut). Aucun secret n'est versionné : `.env` est ignoré par git et `.env.example` sert de marqueur. Les valeurs par défaut visibles dans `config/settings.py` (IDs de salons/rôles du déploiement d'origine) sont à remplacer par les tiens dans ton `.env`.
