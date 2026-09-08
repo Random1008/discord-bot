@@ -32,9 +32,8 @@ models/     modèles ORM SQLAlchemy
 database/   engine async + session
 config/     settings pydantic (lecture du .env) + configs JSON
 utils/      helpers (logging, redis, cooldowns, chargement des cogs)
-tests/      suite pytest (unitaires + intégration postgres)
 scripts/    tâches auxiliaires (ex. file de suggestions)
-docs/       plans et specs de conception
+automation_queue/  file de suggestions (montée en volume Docker)
 ```
 
 ## Démarrage rapide
@@ -136,13 +135,6 @@ Le bot applique les migrations Alembic au démarrage puis se connecte à Discord
 - Reconfigure les IDs de salons et de rôles (sections 4) : sans eux, leveling, classements, suggestions et procès n'ont pas d'endroit où écrire.
 - Le fichier de config `config/leaderboard_roles.txt` liste aussi les rôles de classement (relu au démarrage).
 - Pense à une base PostgreSQL et un Redis dédiés (les schémas de tables sont créés/mis à jour par les migrations Alembic au premier démarrage).
-
-## Tests
-
-```bash
-pip install -r requirements-dev.txt
-pytest
-```
 
 ## Conteneurisation
 
