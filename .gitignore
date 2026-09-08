@@ -1,0 +1,36 @@
+# Secrets & configuration locale
+.env
+.env.local
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+
+# Backups & artefacts locaux
+*.bak
+*.bak.*
+*.log
+
+# Données runtime (file de suggestions)
+automation_queue/pending/*
+automation_queue/done/*
+automation_queue/failed/*
+!automation_queue/pending/.gitkeep
+!automation_queue/done/.gitkeep
+!automation_queue/failed/.gitkeep
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
