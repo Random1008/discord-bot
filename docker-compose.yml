@@ -1,0 +1,26 @@
+name: colombina
+
+networks:
+  shared_backend:
+    external: true
+
+services:
+  bot:
+    container_name: colombina-new
+    build:
+      context: ..
+      dockerfile: colombina/Dockerfile
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://colombina:colombina@postgres:5432/colombina
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - ./.env:/app/.env
+      - ./config/leaderboard_roles.txt:/app/config/leaderboard_roles.txt
+      - ./config/welcome_config.json:/app/config/welcome_config.json
+      - ./config/proces_config.json:/app/config/proces_config.json
+      - ./automation_queue:/app/automation_queue
+    networks:
+      - shared_backend
+    restart: unless-stopped

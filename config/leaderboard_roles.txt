@@ -1,0 +1,12 @@
+# Rôles Discord attribués chaque semaine au n°1 de chaque classement.
+# Remplis l'ID du rôle Discord après le ":" (laisse vide = pas de rôle attribué pour ce classement).
+# Le bot relit ce fichier à chaque passage hebdomadaire, pas besoin de redémarrer après modification.
+roi_du_chat:1531699647205085406
+maitre_vocal:1531699610651856906
+riche:1535266215445139557
+
+# Rôles multi-détenteurs : donnés à TOUS les membres du top 10 du classement (pas seulement au n°1).
+# Quiconque sort du top 10 perd le rôle au passage suivant ; si le classement est vide, personne ne l'a.
+top_10_vocal:1531699673910476910
+top_10_message:1531939563784896553
+top_10_argent:1535265956559982633

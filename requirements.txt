@@ -1,0 +1,8 @@
+discord.py>=2.4,<3.0
+SQLAlchemy>=2.0,<2.1
+asyncpg>=0.29,<0.30
+alembic>=1.13,<1.14
+pydantic-settings>=2.2,<3.0
+redis>=5.0,<6.0
+Pillow>=10.0,<11.0
+aiohttp>=3.9,<4.0
