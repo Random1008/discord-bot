@@ -143,22 +143,36 @@ async def _get_or_create_tower_channel(guild: discord.Guild, member) -> discord.
 # contournent les permissions Discord) mais leurs messages y sont supprimés
 # automatiquement — comme ceux de n'importe quel autre membre.
 
-TOWER_STARTER_TITLE = "🏰 Ton salon de la Tour"
-TOWER_ACCESS_TITLE = "🏰 Salon de la Tour"
+TOWER_STARTER_TITLE = "🏰 Bienvenue au pied de la Tour"
+TOWER_ACCESS_TITLE = "🏰 La Tour"
+# `.setup tower` = le récit d'accroche (lore). Les commandes, elles, vivent dans
+# le salon privé du joueur (TOWER_STARTER_FIELDS), pas sur le panneau public.
 TOWER_ACCESS_DESCRIPTION = (
-    "Clique sur le bouton ci-dessous pour ouvrir **ton salon privé de la Tour** : "
-    "il est créé dans la catégorie des salons de la Tour, visible par toi et par les "
-    "admins — mais **toi seul peux y écrire** (tout autre message y est supprimé "
-    "automatiquement, admins compris).\n\n"
-    "Le bouton ne périme jamais : tu peux revenir chercher ton salon à tout moment."
+    "**La Tour** se dresse aux confins du domaine : cent étages de pierre noire dont "
+    "personne n'a jamais vu le sommet. Les anciens racontent qu'elle fut bâtie autour "
+    "d'un cœur qui bat encore — *le Cœur de la Tour* — et que celui qui l'atteindra "
+    "pourra se réclamer de son héritage.\n\n"
+    "Beaucoup sont montés. Presque tous sont redescendus en morceaux, ou ne sont jamais "
+    "redescendus du tout. Les murs gardent la mémoire de chaque ascension : ton nom y "
+    "sera gravé, que tu tombes au troisième étage ou que tu fasses plier le Cœur à genoux.\n\n"
+    "Là-haut t'attendent des monstres et des marchands, des énigmes, des salles maudites "
+    "et des trésors ; des classes et des traits à débloquer, de l'équipement qui te suivra "
+    "d'une run à l'autre, un codex à remplir et des titres à arracher aux boss. Chaque "
+    "descente laissera une trace — et chaque trace te rendra plus dur à tuer.\n\n"
+    "Pour toi, elle commence par un salon."
+)
+TOWER_ACCESS_HINT = (
+    "Clique sur **Ouvrir mon salon** : je te crée un salon privé où l'ascension se joue. "
+    "Toi et l'équipe pouvez le voir, **toi seul peux y écrire** — et tu y retrouveras la "
+    "liste des commandes utiles. Le bouton reste ouvert pour toujours."
 )
 TOWER_STARTER_FIELDS = [
     (
-        "🎮 La Tour",
-        "Utilise les boutons ci-dessous : **Entrer** (lancer ou reprendre ta run), "
-        "**Or**, **Codex**, **Équipement**, **Abandonner**.",
+        "🚪 Commencer l'ascension",
+        "Clique sur **Entrer** ci-dessous : tu choisis ta classe et l'Or que tu emportes, "
+        "puis tu montes. **Abandonner** met fin à la run (ton Or est mis de côté).",
     ),
-    ("🎒 Inventaire", "`$inventory` — tes objets et tes clés · `!effects` — tes effets actifs"),
+    ("🎒 Inventaire & effets", "`$inventory` — tes objets et tes clés · `!effects` — tes effets actifs"),
     ("💰 Argent", "`$balance` · `$bank` · `$daily` · `$work` · `$pay @membre <montant>`"),
     ("🛒 Boutique", "`$shop` — ce qui est en vente · `$buy <id>` — acheter · `$sell <id>` — revendre"),
     ("📈 Progression", "`!profile` · `!quest` · `!leaderboard tour` — l'ascension des autres joueurs"),
@@ -279,29 +293,31 @@ async def ensure_tower_channel(guild: discord.Guild, member, *, private: bool = 
 
 
 def build_tower_access_embed() -> discord.Embed:
-    """Panneau posté par `.setup tower` (bouton d'accès au salon privé)."""
+    """Panneau posté par `.setup tower` : le récit de la Tour + le bouton d'accès.
+
+    Volontairement SANS liste de commandes : `.setup tower` sert à raconter la
+    Tour ; les commandes joueur sont dans le salon privé, posées par
+    `build_tower_starter_embed`.
+    """
     embed = discord.Embed(
         title=TOWER_ACCESS_TITLE,
         description=TOWER_ACCESS_DESCRIPTION,
         color=discord.Color.dark_teal(),
     )
-    embed.add_field(
-        name="Dans ton salon",
-        value="\n".join(f"• {name} — {value}" for name, value in TOWER_STARTER_FIELDS),
-        inline=False,
-    )
+    embed.add_field(name="Ton ascension", value=TOWER_ACCESS_HINT, inline=False)
     return embed
 
 
 def build_tower_starter_embed(member) -> discord.Embed:
-    """Message d'accueil posté une fois au début de chaque salon de la Tour."""
+    """Message de bienvenue du salon du joueur, avec les commandes utiles."""
     mention = getattr(member, "mention", None) or "Bienvenue"
     embed = discord.Embed(
         title=TOWER_STARTER_TITLE,
         description=(
-            f"{mention}, ce salon est **privé** : toi et les admins pouvez le voir, "
-            "mais toi seul peux y écrire — tout autre message y est supprimé "
-            "automatiquement."
+            f"{mention}, te voilà au pied de la Tour. Ce salon est **le tien** : toi et "
+            "l'équipe pouvez le voir, mais toi seul peux y écrire — tout autre message y "
+            "est supprimé automatiquement.\n\n"
+            "L'ascension se joue ici, avec les boutons ci-dessous. Les commandes utiles :"
         ),
         color=discord.Color.dark_teal(),
     )
