@@ -6,7 +6,7 @@ Développé en Python, SQLAlchemy 2 (async) et PostgreSQL.
 ## Fonctionnalités
 
 - **Économie** : `$daily`, `$work`, `$pay`, boutique/marché, coffres, investissements, crime/braquage
-- **Casino & jeu** : blackjack, high-low, poker, machine à sous, tournois
+- **Casino & jeu** : blackjack, high-low, poker, machine à sous, tournois, et un **étage VIP** (salon dédié, mises de 1 M à 1 Md, multiplicateur de gain aléatoire x0.5 à x15) dont l'accès s'achète en boutique pour 10Md et se verrouille côté bot : sans le rôle VIP, impossible d'écrire ou de lancer une commande dans le salon VIP, administrateurs compris (`.vipguard` pour (re)poser les permissions du salon, `.vipaudit` pour purger les rôles obtenus sans achat)
 - **Progression** : XP et niveaux (`!rank`, `!level`), rôles récompenses par paliers, prestiges, séries quotidiennes (streaks), succès/badges
 - **Profil & classements** : cartes de profil, classements hebdomadaires avec rôles (roi du chat, maître du vocal, plus riche…)
 - **RPG / Tour** : tour de donjon, équipement, butin, inventaire, objets cosmétiques, gacha
@@ -33,7 +33,7 @@ models/     modèles ORM SQLAlchemy
 database/   engine async + session
 config/     settings pydantic (lecture du .env) + configs JSON
 utils/      helpers (logging, redis, cooldowns, chargement des cogs)
-scripts/    tâches auxiliaires (ex. file de suggestions)
+scripts/    tâches auxiliaires (file de suggestions, verrou du salon VIP, audit des aides)
 automation_queue/  file de suggestions (montée en volume Docker)
 ```
 

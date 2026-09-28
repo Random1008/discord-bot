@@ -8,6 +8,7 @@ from services.admin_permission import can_bypass
 from services.economy import InsufficientBalanceError
 from services.inventory import list_inventory
 from services.market import (
+    ROLE_ITEM_TYPE,
     ItemNotOwnedError,
     ItemNotPurchasableError,
     ItemNotSellableError,
@@ -15,12 +16,15 @@ from services.market import (
     add_generic_item,
     edit_item_by_id,
     format_item_list,
+    format_price,
     get_item_by_id,
     list_all_items,
     list_purchasable_items,
     purchase_item_by_id,
     remove_item,
+    resolve_role_id,
     sell_item,
+    user_owns_item,
 )
 from services.users import get_or_create_user
 from utils.permissions import is_admin
@@ -36,7 +40,7 @@ def build_shop_embed(items: list[MarketItem]) -> discord.Embed:
     for item in items:
         embed.add_field(
             name=f"{item.name} — `{item.id}`",
-            value=f"**{item.price}** coins\n{item.description}",
+            value=f"**{format_price(item.price)}** coins\n{item.description}",
             inline=False,
         )
     return embed
@@ -51,7 +55,9 @@ class EditItemModal(discord.ui.Modal, title="Modifier l'objet"):
         self.description_input = discord.ui.TextInput(
             label="Description", default=item.description, style=discord.TextStyle.paragraph, max_length=255
         )
-        self.price_input = discord.ui.TextInput(label="Prix", default=str(item.price), max_length=10)
+        # 15 caractères : les prix premium (accès VIP à 10 Md = 11 chiffres)
+        # ne rentrent pas dans l'ancienne limite de 10.
+        self.price_input = discord.ui.TextInput(label="Prix", default=str(item.price), max_length=15)
         self.add_item(self.name_input)
         self.add_item(self.description_input)
         self.add_item(self.price_input)
@@ -139,6 +145,21 @@ class MarketCog(commands.Cog):
                 return
 
             await get_or_create_user(session, guild_id, ctx.author.id, ctx.author.display_name)
+
+            item = await get_item_by_id(session, item_id)
+            if item is not None and item.item_type == ROLE_ITEM_TYPE:
+                # Un accès (rôle) s'obtient uniquement en payant : jamais en
+                # bypass, et jamais deux fois.
+                if bypass:
+                    await ctx.send(
+                        f"❌ **{item.name}** est un accès : il ne peut pas être obtenu en bypass, "
+                        "il s'achète avec des credits."
+                    )
+                    return
+                if await user_owns_item(session, guild_id, ctx.author.id, item_id):
+                    await ctx.send(f"✅ Tu possèdes déjà **{item.name}** : inutile de le racheter.")
+                    return
+
             try:
                 result = await purchase_item_by_id(session, guild_id, ctx.author.id, item_id, bypass_cost=bypass)
             except MarketItemNotFoundError:
@@ -151,13 +172,48 @@ class MarketCog(commands.Cog):
                 await ctx.send("Solde insuffisant.")
                 return
             await session.commit()
+            role_id = (
+                resolve_role_id(result.item.item_value)
+                if result.item.item_type == ROLE_ITEM_TYPE
+                else None
+            )
 
         if bypass:
             await ctx.send(f"✅ [Bypass admin] **{result.item.name}** obtenu sans débit. Solde : {result.new_balance}.")
-        else:
+            return
+
+        await ctx.send(
+            f"✅ Tu as acheté **{result.item.name}** pour {format_price(result.item.price)} coins. "
+            f"Solde restant : {format_price(result.new_balance)}."
+        )
+        if role_id is not None:
+            await self._grant_role(ctx, role_id, result.item.name)
+
+    async def _grant_role(self, ctx: commands.Context, role_id: int, item_name: str) -> bool:
+        """Attribue le rôle d'un objet de boutique acheté (accès VIP)."""
+        guild = ctx.guild
+        role = guild.get_role(role_id) if guild is not None and hasattr(guild, "get_role") else None
+        if role is None:
             await ctx.send(
-                f"✅ Tu as acheté **{result.item.name}** pour {result.item.price} coins. Solde restant : {result.new_balance}."
+                f"⚠️ Achat enregistré, mais le rôle de **{item_name}** est introuvable "
+                f"(id `{role_id}`) : préviens un administrateur."
             )
+            return False
+        try:
+            await ctx.author.add_roles(role, reason=f"Achat boutique : {item_name}")
+        except discord.Forbidden:
+            await ctx.send(
+                f"⚠️ Achat enregistré, mais je n'ai pas la permission d'attribuer **{role.name}** : "
+                "préviens un administrateur."
+            )
+            return False
+        except discord.HTTPException:
+            await ctx.send(
+                f"⚠️ Achat enregistré, mais l'attribution de **{role.name}** a échoué : préviens un administrateur."
+            )
+            return False
+        await ctx.send(f"🎰 Accès accordé : tu portes maintenant **{role.name}**.")
+        return True
 
     @commands.command(name="sell")
     async def sell(self, ctx: commands.Context, *, args: str) -> None:

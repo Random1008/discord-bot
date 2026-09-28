@@ -96,6 +96,23 @@ def build_config_sections(settings, leaderboard_roles: dict[str, int | None]) ->
             ],
         ),
         ConfigSection(
+            title="Casino VIP",
+            entries=[
+                ConfigEntry(
+                    "Salon de l'étage casino VIP",
+                    settings.vip_casino_channel_id,
+                    key="vip_casino_channel_id",
+                    kind="channel",
+                ),
+                ConfigEntry(
+                    "Rôle d'accès au casino VIP",
+                    settings.vip_casino_role_id,
+                    key="vip_casino_role_id",
+                    kind="role",
+                ),
+            ],
+        ),
+        ConfigSection(
             title="Rôles de récompense par niveau",
             entries=[
                 ConfigEntry("Niveau 5", settings.role_actif_id, key="role_actif_id"),

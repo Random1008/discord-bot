@@ -27,7 +27,7 @@ from discord.ext import commands
 from config.settings import settings
 from models.economy import Economy
 from services.admin_permission import can_bypass
-from services.economy import add_balance
+from services.economy import add_balance, get_total_capital, theft_success_chance
 from services.inventory import add_to_inventory
 from services.keys import add_key, roll_key_rarity
 from services.market import get_item_by_id, list_purchasable_items
@@ -510,7 +510,16 @@ class UnderworldCog(commands.Cog):
                     return
 
             if can_target:
-                success_chance = TARGET_SUCCESS_CHANCE if target_mode else 1.0
+                if target_mode:
+                    # Même règle que $rob : l'écart de patrimoine rend le vol
+                    # plus difficile quand la victime est beaucoup plus riche.
+                    success_chance = theft_success_chance(
+                        TARGET_SUCCESS_CHANCE,
+                        await get_total_capital(session, guild_id, ctx.author.id),
+                        await get_total_capital(session, guild_id, target.id),
+                    )
+                else:
+                    success_chance = 1.0
             else:
                 success_chance = spec.success_chance
 

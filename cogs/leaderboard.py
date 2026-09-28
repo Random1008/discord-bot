@@ -7,6 +7,7 @@ from discord.ext import commands
 from services.leaderboard import (
     get_coins_leaderboard,
     get_message_leaderboard,
+    get_tour_leaderboard,
     get_voice_leaderboard,
     get_xp_leaderboard,
 )
@@ -18,6 +19,7 @@ LEADERBOARD_FETCHERS = {
     "messages": get_message_leaderboard,
     "vocal": get_voice_leaderboard,
     "coins": get_coins_leaderboard,
+    "tour": get_tour_leaderboard,
 }
 
 LEADERBOARD_LABELS = {
@@ -25,6 +27,7 @@ LEADERBOARD_LABELS = {
     "messages": "Messages",
     "vocal": "Temps vocal (secondes)",
     "coins": "Coins",
+    "tour": "Étage max",
 }
 
 LEADERBOARD_EMOJIS = {
@@ -32,6 +35,7 @@ LEADERBOARD_EMOJIS = {
     "messages": "💬",
     "vocal": "🎙️",
     "coins": "💰",
+    "tour": "🗼",
 }
 
 RANK_MEDALS = {1: "🥇", 2: "🥈", 3: "🥉"}
@@ -65,7 +69,9 @@ class LeaderboardCog(commands.Cog):
 
     @commands.command(name="leaderboard")
     async def leaderboard(
-        self, ctx: commands.Context, type: Literal["xp", "messages", "vocal", "coins"] = "xp"
+        self,
+        ctx: commands.Context,
+        type: Literal["xp", "messages", "vocal", "coins", "tour"] = "xp",
     ) -> None:
         fetcher = LEADERBOARD_FETCHERS[type]
         async with self._session() as session:

@@ -2,12 +2,22 @@ import random
 
 from sqlalchemy import select
 
+from config.settings import settings
 from models.market import MarketItem
 from services.economy import add_balance, get_balance, subtract_balance
-from services.inventory import add_to_inventory, remove_from_inventory
+from services.inventory import add_to_inventory, get_inventory_count, remove_from_inventory
 from services.keys import add_key, get_key_count, remove_key, roll_key_rarity
 
 SELL_REFUND_RATIO = 0.8
+
+# Objet de boutique qui débloque l'étage VIP du casino. Il vit en base (table
+# market_items, ligne globale) : `item_type = "role"` et `item_value` contient
+# soit un id de rôle, soit le marqueur "vip_casino_role" résolu via `.config`.
+ROLE_ITEM_TYPE = "role"
+VIP_ACCESS_ITEM_KEY = "acces_casino_vip"
+VIP_ACCESS_ITEM_NAME = "Accès Casino VIP"
+VIP_ACCESS_PRICE = 10_000_000_000  # 10 Md (1 Md = 1 milliard)
+VIP_ROLE_ITEM_VALUE = "vip_casino_role"
 
 
 class MarketItemNotFoundError(Exception):
@@ -68,6 +78,63 @@ async def get_item_by_id(session, item_id: int) -> MarketItem | None:
     return await session.get(MarketItem, item_id)
 
 
+async def get_item_by_key(session, key: str) -> MarketItem | None:
+    result = await session.execute(select(MarketItem).where(MarketItem.key == key))
+    return result.scalar_one_or_none()
+
+
+async def user_owns_item(session, guild_id: int, user_id: int, item_id: int) -> bool:
+    """Vrai si le joueur possède au moins une unité de cet objet.
+
+    Sert de preuve d'achat : c'est ce qui légitime la possession du rôle VIP
+    (cf. cogs/vip.py).
+    """
+    return await get_inventory_count(session, guild_id, user_id, item_id) > 0
+
+
+def resolve_role_id(item_value: str | None) -> int | None:
+    """Id de rôle visé par un objet de type « role ».
+
+    `item_value` peut être un id numérique ou le marqueur "vip_casino_role",
+    résolu à la volée depuis la configuration (`.config`).
+    """
+    if not item_value:
+        return None
+    if item_value == VIP_ROLE_ITEM_VALUE:
+        configured = settings.vip_casino_role_id
+        try:
+            return int(configured) if configured else None
+        except (TypeError, ValueError):
+            return None
+    try:
+        return int(item_value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _compact(amount: int, unit: int, suffix: str) -> str:
+    value = amount / unit
+    rounded = round(value, 2)
+    if rounded == int(rounded):
+        text = str(int(rounded))
+    else:
+        text = f"{rounded:.2f}".rstrip("0").rstrip(".").replace(".", ",")
+    return f"{text}{suffix}"
+
+
+def format_price(price: int) -> str:
+    """Prix en credits, compacté à partir du million.
+
+    10 000 000 000 -> « 10Md », 1 000 000 -> « 1M », 1 500 000 -> « 1,5M »,
+    en dessous du million le montant reste en chiffres (200 -> « 200 »).
+    """
+    if price >= 1_000_000_000:
+        return _compact(price, 1_000_000_000, "Md")
+    if price >= 1_000_000:
+        return _compact(price, 1_000_000, "M")
+    return str(price)
+
+
 async def _purchase(session, guild_id: int, user_id: int, item: MarketItem, rng=random, bypass_cost: bool = False) -> PurchaseResult:
     if item.guild_id is not None and item.guild_id != guild_id:
         raise MarketItemNotFoundError(str(item.id))
@@ -110,6 +177,11 @@ async def sell_item(session, guild_id: int, user_id: int, item_id: int) -> SellR
     item = await get_item_by_id(session, item_id)
     if item is None:
         raise MarketItemNotFoundError(str(item_id))
+
+    if item.item_type == ROLE_ITEM_TYPE:
+        # Un accès (rôle) n'est jamais remboursable : le revendre retirerait un
+        # droit d'accès tout en rendant 80 % du prix.
+        raise ItemNotSellableError(str(item_id))
 
     if item.item_type == "key":
         if item.item_value == "aleatoire":
@@ -172,5 +244,5 @@ def format_item_list(items: list[MarketItem]) -> str:
         return "🛒 La boutique est vide pour le moment."
     lines = ["🛒 **Objets de la boutique** (id • nom — prix — type)"]
     for item in items:
-        lines.append(f"`{item.id}` • **{item.name}** — {item.price} coins — {item.item_type}")
+        lines.append(f"`{item.id}` • **{item.name}** — {format_price(item.price)} coins — {item.item_type}")
     return "\n".join(lines)

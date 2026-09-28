@@ -17,6 +17,9 @@ PLAYER_CATEGORIES = [
         "restricted_on_yoru_guild": False,
         "entries": [
             ("$balance", "Voir ton solde de credits."),
+            ("$bank", "Voir ton solde en banque (et sa part de ton capital)."),
+            ("$bank add <montant>", "Déposer des credits en banque (la banque ne peut pas dépasser 50 % du capital)."),
+            ("$bank remove <montant>", "Retirer des credits de la banque."),
             ("$pay @membre <montant>", "Payer quelqu'un."),
             ("$daily", "Récupérer ta récompense quotidienne (bonus de série)."),
             ("$work", "Travailler pour gagner des credits."),
@@ -75,7 +78,7 @@ PLAYER_CATEGORIES = [
         "key": "casino",
         "label": "Casino",
         "emoji": "🎰",
-        "description": "Jeux de hasard : mise des credits.",
+        "description": "Jeux de hasard : mise des credits. Mise maximum 100 000 credits ; l'étage VIP (salon dédié) accepte de 1 M à 1 Md avec un multiplicateur de gain aléatoire x0.5 à x15, réservé aux membres ayant le rôle VIP et 1 Md de capital.",
         "restricted_on_yoru_guild": True,
         "entries": [
             ("$coinflip <mise> [pile|face]", "Pile ou face."),
@@ -89,6 +92,15 @@ PLAYER_CATEGORIES = [
             ("$craps <mise> <sept|plus|moins>", "Craps : parie sur la somme de deux dés."),
             ("$jackpot <mise>", "Cagnotte progressive du serveur."),
             ("$casinostats", "Voir tes statistiques casino."),
+            (
+                "$<jeu> <mise> (salon VIP)",
+                "Dans le salon VIP : mêmes jeux, mise de 1 M à 1 Md, et chaque gain est multiplié par un facteur aléatoire entre x0.5 et x15. Accès : rôle VIP + 1 Md de capital (portefeuille + banque).",
+            ),
+            (
+                "$shop → Accès Casino VIP",
+                "Le rôle VIP s'achète en boutique pour 10Md (10 milliards). Sans ce rôle, impossible "
+                "d'écrire ou de jouer dans le salon VIP.",
+            ),
         ],
     },
     {
@@ -98,10 +110,13 @@ PLAYER_CATEGORIES = [
         "description": "Invocations de personnages à collectionner.",
         "restricted_on_yoru_guild": True,
         "entries": [
-            ("$gacha pull / multi", "Invoquer un ou plusieurs personnages."),
-            ("$gacha rates / pity", "Taux d'invocation et pity actuel."),
+            ("$gacha pull", "Invoquer un personnage."),
+            ("$gacha multi", "Invoquer plusieurs personnages d'un coup."),
+            ("$gacha rates", "Voir les taux d'invocation."),
+            ("$gacha pity", "Voir ton compteur de pity (garantie)."),
             ("$gacha list", "Voir tous les personnages du gacha, triés par rareté."),
-            ("$gacha inventory / history", "Personnages obtenus et historique."),
+            ("$gacha inventory", "Voir les personnages que tu possèdes."),
+            ("$gacha history", "Voir ton historique d'invocations."),
             ("$gacha wishlist set/clear <nom>", "Gérer ta wishlist."),
         ],
     },
@@ -128,8 +143,12 @@ PLAYER_CATEGORIES = [
         "restricted_on_yoru_guild": False,
         "entries": [
             ("!profile [@membre]", "Voir un profil (niveau, badges, clés)."),
+            ("!effects", "Voir tes effets actifs (boosts XP/coins, assurances casino, protections de série…)."),
             ("!quest", "Voir tes quêtes du jour."),
-            ("!leaderboard [xp|messages|vocal|coins]", "Classement du serveur (XP, messages, temps vocal, argent)."),
+            ("!leaderboard [xp|messages|vocal|coins|tour]", "Classement du serveur (XP, messages, temps vocal, argent, étage de la Tour)."),
+            ("!suggest <idée>", "Proposer une idée dans le salon des suggestions (un entretien IA peut t'être demandé)."),
+            ("!help", "Afficher ce menu (toutes les commandes)."),
+            ("!maj", "Présentation simple du bot, pour les nouveaux membres."),
         ],
     },
 ]
@@ -166,13 +185,24 @@ ADMIN_CATEGORIES = [
         "key": "admin_acces",
         "label": "Permissions & Accès",
         "emoji": "🔐",
-        "description": "Bloquer/débloquer un membre et gérer la whitelist admin.",
+        "description": "Bloquer/débloquer un membre, gérer la whitelist admin et verrouiller l'étage VIP.",
         "restricted_on_yoru_guild": False,
         "entries": [
             (".bot off @membre", "Bloquer un membre : il ne peut plus utiliser aucune commande du bot."),
             (".bot on @membre", "Débloquer un membre."),
             (".permadd @membre", "Autoriser un membre à utiliser les commandes admin (en plus du rôle requis)."),
             (".permremove @membre", "Retirer l'accès admin d'un membre."),
+            (
+                ".vipguard [on|off]",
+                "Verrouiller le salon VIP : seul le rôle VIP (et le bot) peut y écrire. Sans le rôle, "
+                "les messages sont supprimés et les commandes refusées — admins et propriétaire compris. "
+                "« off » remet les permissions du salon par défaut.",
+            ),
+            (
+                ".vipaudit",
+                "Lister les porteurs du rôle VIP qui ne l'ont pas acheté en boutique, avec confirmation "
+                "pour leur retirer l'accès. Le rôle s'obtient uniquement en l'achetant (`$shop`).",
+            ),
         ],
     },
     {
@@ -265,6 +295,13 @@ ADMIN_CATEGORIES = [
                 ".reset @membre <argent|tour|casino|gacha|boutique|all>",
                 "Réinitialiser une partie ciblée d'un membre (irréversible). « all » et « boutique » demandent "
                 "si les articles de la boutique doivent être supprimés ou juste mis à prix 0.",
+            ),
+            (
+                ".reset everything",
+                "TOUT effacer pour TOUS les joueurs du serveur : argent, niveau/XP/prestige, Tour, gacha "
+                "et clés, badges, inventaire, casino, effets, quêtes, séries, stats, investissements, "
+                "cagnotte et boutique ; les rôles de progression sont retirés à tout le monde. "
+                "Propriétaire du bot uniquement, avec confirmation.",
             ),
         ],
     },

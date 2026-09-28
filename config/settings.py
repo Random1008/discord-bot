@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     tour_category_id: str | None = None
     mafia_channel_id: str | None = None
     proces_channel_id: str | None = None
+    # Étage casino VIP : salon dédié + rôle d'accès (modifiables via `.config`).
+    vip_casino_channel_id: str | None = None
+    vip_casino_role_id: str | None = None
     deepseek_api_key: str | None = None
 
 

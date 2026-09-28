@@ -1,13 +1,16 @@
 import discord
 from discord.ext import commands
+from pathlib import Path
 from sqlalchemy.exc import NoResultFound
 
 from cogs._xp_common import award_xp
 from config.settings import ADMIN_PERMISSION_OWNER_ID, settings
 from services.admin_actions import (
+    count_guild_players,
     grant_reward_by_level,
     reset_casino,
     reset_currency,
+    reset_everything,
     reset_gacha,
     reset_market,
     reset_tower,
@@ -17,10 +20,41 @@ from services.admin_actions import (
 from services.admin_permission import grant_permission, revoke_permission
 from services.bot_access import block_user, unblock_user
 from services.economy import InsufficientBalanceError, add_balance, set_balance, subtract_balance
+from services.leaderboard_roles import parse_role_config
 from services.leveling import subtract_xp
 from services.rewards import grant_badge_by_key
 from services.rpg_db import admin_adjust_floor_reached_max, admin_set_floor_reached_max
 from services.users import get_or_create_user
+
+# Rôles Discord de progression retirés par `.reset everything` : paliers de
+# niveau, rôles de prestige, et rôles de classement hebdomadaire (lus dans le
+# .txt, seule source de vérité pour ceux-là).
+LEVEL_ROLE_SETTING_KEYS = (
+    "role_actif_id",
+    "role_habitue_id",
+    "role_veteran_id",
+    "role_legendaire_id",
+    "role_bronze_id",
+    "role_argent_id",
+    "role_or_id",
+    "role_platine_id",
+    "role_diamant_id",
+    "role_mythique_id",
+    "role_vip_argent_id",
+    "role_premium_id",
+    "prestige_1_role_id",
+    "prestige_2_role_id",
+    "prestige_3_role_id",
+    "prestige_4_role_id",
+    "leaderboard_roi_du_chat_id",
+    "leaderboard_maitre_vocal_id",
+    "leaderboard_riche_id",
+    "leaderboard_top_10_vocal_id",
+    "leaderboard_top_10_message_id",
+    "leaderboard_top_10_argent_id",
+)
+LEADERBOARD_ROLES_PATH = Path(__file__).resolve().parent.parent / "config" / "leaderboard_roles.txt"
+
 
 def _is_permission_owner(ctx: commands.Context) -> bool:
     return ctx.author.id == ADMIN_PERMISSION_OWNER_ID
@@ -66,6 +100,40 @@ class _MarketResetView(discord.ui.View):
             return
         self._choose(interaction, "reset_price")
         await interaction.response.edit_message(view=self)
+
+
+class _ConfirmEverythingView(discord.ui.View):
+    """Confirmation en deux temps de `.reset everything` (destructif et global)."""
+
+    def __init__(self, author_id: int) -> None:
+        super().__init__(timeout=120)
+        self.author_id = author_id
+        self.confirmed = False
+
+    def _check(self, interaction: discord.Interaction) -> bool:
+        return interaction.user.id == self.author_id
+
+    @discord.ui.button(label="⚠️ TOUT effacer", style=discord.ButtonStyle.danger)
+    async def _confirm(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        if not self._check(interaction):
+            await interaction.response.send_message("❌ Ce n'est pas ton reset.", ephemeral=True)
+            return
+        self.confirmed = True
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(view=self)
+        self.stop()
+
+    @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary)
+    async def _cancel(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        if not self._check(interaction):
+            await interaction.response.send_message("❌ Ce n'est pas ton reset.", ephemeral=True)
+            return
+        self.confirmed = False
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(view=self)
+        self.stop()
 
 
 class AdminCog(commands.Cog):
@@ -189,8 +257,26 @@ class AdminCog(commands.Cog):
 
     @commands.command(name="reset")
     @commands.has_permissions(administrator=True)
-    async def reset(self, ctx: commands.Context, membre: discord.Member, categorie: str) -> None:
-        categorie = categorie.lower()
+    async def reset(self, ctx: commands.Context, cible, categorie: str = "") -> None:
+        """`.reset everything` (propriétaire du bot uniquement) efface TOUTE la
+        progression de TOUS les joueurs du serveur. `.reset @membre <...>` reste
+        la réinitialisation ciblée d'un membre."""
+        if isinstance(cible, str) and cible.lower() in ("everything", "tout") and not categorie:
+            await self._reset_everything(ctx)
+            return
+
+        membre = cible
+        if isinstance(membre, str):
+            try:
+                membre = await commands.MemberConverter().convert(ctx, membre)
+            except commands.MemberNotFound:
+                await ctx.send(
+                    "Membre introuvable. Usage : `.reset @membre <argent|tour|casino|gacha|boutique|all>` "
+                    "ou `.reset everything` (tout le serveur)."
+                )
+                return
+
+        categorie = (categorie or "").lower()
         valid = set(RESET_ACTIONS) | {"boutique", "market", "all"}
         if categorie not in valid:
             await ctx.send("Catégorie invalide. Choisis parmi : argent, tour, casino, gacha, boutique, all.")
@@ -230,6 +316,92 @@ class AdminCog(commands.Cog):
             await session.commit()
 
         await ctx.send(f"🛠️ {membre.display_name} : **{label}** réinitialisé(s) (irréversible).")
+
+    # ---------------- .reset everything (global) ----------------
+
+    def _progression_role_ids(self) -> set[int]:
+        """IDs des rôles Discord de progression (niveaux, prestige, classements)."""
+        role_ids: set[int] = set()
+        for key in LEVEL_ROLE_SETTING_KEYS:
+            value = getattr(settings, key, None)
+            if not value:
+                continue
+            try:
+                role_ids.add(int(value))
+            except (TypeError, ValueError):
+                continue
+        try:
+            config = parse_role_config(LEADERBOARD_ROLES_PATH.read_text(encoding="utf-8"))
+        except OSError:
+            config = {}
+        role_ids.update(role_id for role_id in config.values() if role_id)
+        return role_ids
+
+    async def _strip_progression_roles(self, guild) -> int:
+        """Retire à tous les membres les rôles de progression. Retourne le nombre
+        de membres modifiés."""
+        if guild is None:
+            return 0
+        role_ids = self._progression_role_ids()
+        if not role_ids:
+            return 0
+        touched = 0
+        for member in getattr(guild, "members", []):
+            if member.bot:
+                continue
+            held = [role for role in getattr(member, "roles", []) if role.id in role_ids]
+            if not held:
+                continue
+            try:
+                await member.remove_roles(*held, reason=".reset everything")
+                touched += 1
+            except discord.Forbidden:  # rôle au-dessus du bot : on continue
+                continue
+        return touched
+
+    async def _reset_everything(self, ctx: commands.Context) -> None:
+        """Efface TOUTE la progression de TOUS les joueurs (propriétaire seul)."""
+        if not _is_permission_owner(ctx):
+            await ctx.send("⛔ `.reset everything` est réservé au propriétaire du bot.")
+            return
+        if ctx.guild is None:
+            await ctx.send("❌ Commande utilisable uniquement sur un serveur.")
+            return
+
+        guild_id = ctx.guild.id
+        async with self._session() as session:
+            players = await count_guild_players(session, guild_id)
+
+        view = _ConfirmEverythingView(ctx.author.id)
+        await ctx.send(
+            f"⚠️ **`.reset everything`** va effacer TOUTE la progression de **{players}** joueur(s) :\n"
+            "argent (portefeuille + banque), niveau/XP/prestige, Tour RPG, gacha **et clés**, badges, "
+            "inventaire, casino, effets actifs, quêtes, séries quotidiennes, stats messages/vocal, "
+            "investissements.\n"
+            "La cagnotte du jackpot et la boutique sont remises à zéro, et les rôles de progression "
+            "sont retirés à tous les membres.\n"
+            "**Irréversible.** Confirmer ?",
+            view=view,
+        )
+        await view.wait()
+        if not view.confirmed:
+            await ctx.send("⏱️ Reset annulé (aucune donnée touchée).")
+            return
+
+        async with self._session() as session:
+            counts = await reset_everything(session, guild_id)
+            market_count = await reset_market(session, guild_id, "delete")
+            await session.commit()
+
+        roles_removed = await self._strip_progression_roles(ctx.guild)
+
+        total = sum(counts.values())
+        await ctx.send(
+            f"♻️ **Reset everything terminé.** {total} ligne(s) effacée(s)/remise(s) à zéro sur "
+            f"{len(counts)} tables — dont **{players}** joueur(s) repartent de zéro.\n"
+            f"Boutique : **{market_count}** article(s) supprimé(s). Cagnotte du jackpot remise à zéro.\n"
+            f"Rôles de progression retirés à **{roles_removed}** membre(s)."
+        )
 
     @commands.group(name="money", invoke_without_command=True)
     @commands.has_permissions(administrator=True)

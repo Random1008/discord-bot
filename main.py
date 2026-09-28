@@ -6,6 +6,7 @@ import discord
 from discord.ext import commands
 
 from config.settings import ADMIN_PERMISSION_ROLE_ID, YORU_DUPLICATE_RESTRICTED_GUILD_ID, settings
+from cogs.vip import VipAccessDenied, enforce_vip_channel_lock
 from database.engine import AsyncSessionLocal
 from services.admin_permission import has_permission
 from services.bot_access import is_blocked
@@ -119,6 +120,8 @@ ADMIN_COMMAND_NAMES = {
     "permadd",
     "permremove",
     "proces end",
+    "vipguard",
+    "vipaudit",
 }
 
 # Commandes admin qui gèrent la whitelist elle-même : exemptées uniquement de
@@ -224,6 +227,14 @@ def create_bot() -> commands.Bot:
                 raise MissingAdminPermission()
         return True
 
+    @bot.check
+    async def enforce_vip_channel_lock_check(ctx: commands.Context) -> bool:
+        """Le salon VIP refuse toute commande aux membres sans le rôle VIP.
+
+        Volontairement sans exception : ni administrateur ni propriétaire.
+        """
+        return await enforce_vip_channel_lock(ctx)
+
     @bot.event
     async def on_command_error(ctx: commands.Context, error: commands.CommandError) -> None:
         if isinstance(error, commands.CommandNotFound):
@@ -235,6 +246,9 @@ def create_bot() -> commands.Bot:
         if isinstance(error, FeatureUnavailableOnGuild):
             return
         if isinstance(error, UserBlocked):
+            return
+        if isinstance(error, VipAccessDenied):
+            # Refus volontaire : le message a déjà été envoyé par le check.
             return
         if isinstance(error, WrongPrefixScope):
             await ctx.send(f"❌ Cette commande s'utilise avec `{error.expected_prefix}`, pas `{ctx.prefix}`.")

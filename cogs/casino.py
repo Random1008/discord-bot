@@ -4,6 +4,7 @@ import random
 import discord
 from discord.ext import commands
 
+from config.settings import settings
 from models.economy import Economy
 from services.casino import (
     add_to_jackpot,
@@ -35,6 +36,21 @@ SYMBOLS = ["🍒", "🍊", "🍋", "💎", "7️⃣"]
 WEIGHTS = [35, 30, 25, 7, 3]
 JACKPOT_WIN_CHANCE = 0.01
 
+# Mises autorisées : plafond commun au casino classique (configurable via le
+# salon VIP, qui autorise des mises beaucoup plus élevées).
+MAX_BET = 100_000
+
+# Étage VIP : salon dédié (settings.vip_casino_channel_id), accès réservé aux
+# porteurs du rôle VIP (settings.vip_casino_role_id) ayant 1 Md de capital
+# (portefeuille + banque). Mises entre 1 M et 1 Md, et chaque gain est multiplié
+# par un facteur aléatoire entre x0.5 et x15.
+VIP_MIN_BET = 1_000_000
+VIP_MAX_BET = 1_000_000_000
+VIP_REQUIRED_CAPITAL = 1_000_000_000
+VIP_MULTIPLIER_MIN = 0.5
+VIP_MULTIPLIER_MAX = 15.0
+VIP_MULTIPLIER_NOTE = "🎰 Multiplicateur VIP"
+
 BYPASS_SUFFIX = " (bypass admin : mise non débitée)"
 INSURANCE_NOTE = "🔒 Assurance : mise remboursée"
 DOUBLE_WIN_NOTE = "✨ Double gain appliqué"
@@ -53,9 +69,21 @@ class CasinoCog(commands.Cog):
         return economy.balance if economy is not None else 0
 
     async def _settle(
-        self, session, guild_id: int, user_id: int, mise: int, gain: int, bypass: bool
+        self,
+        session,
+        guild_id: int,
+        user_id: int,
+        mise: int,
+        gain: int,
+        bypass: bool,
+        multiplier: float = 1.0,
     ) -> tuple[int, int, list[str]]:
         notes: list[str] = []
+        if multiplier != 1.0 and gain > 0:
+            # Gain de l'étage VIP : le multiplicateur s'applique AVANT les effets
+            # casino (double gain / assurance), qui se cumulent avec lui.
+            gain = int(gain * multiplier)
+            notes.append(f"{VIP_MULTIPLIER_NOTE} x{multiplier:.2f}")
         if not bypass:
             if gain > mise and await consume_one_shot(session, guild_id, user_id, "casino_double_win"):
                 gain = mise + (gain - mise) * 2
@@ -80,6 +108,61 @@ class CasinoCog(commands.Cog):
             return BYPASS_SUFFIX
         return "".join(f"\n{note}" for note in notes)
 
+    def _is_vip_channel(self, ctx: commands.Context) -> bool:
+        """Vrai si la commande est lancée dans le salon de l'étage VIP."""
+        vip_channel_id = settings.vip_casino_channel_id
+        channel = getattr(ctx, "channel", None)
+        if not vip_channel_id or channel is None:
+            return False
+        return str(channel.id) == str(vip_channel_id)
+
+    async def _capital(self, session, guild_id: int, user_id: int) -> int:
+        """Capital total d'un joueur = portefeuille + banque."""
+        economy = await session.get(Economy, (guild_id, user_id))
+        if economy is None:
+            return 0
+        return economy.balance + economy.bank_balance
+
+    async def _bet_guard(self, ctx: commands.Context, session, mise: int, bypass: bool) -> float | None:
+        """Valide la mise selon le salon et renvoie le multiplicateur de gain.
+
+        - salon classique : mise plafonnée à MAX_BET ;
+        - salon VIP : rôle VIP + capital >= 1 Md, mise entre 1 M et 1 Md, gain
+          multiplié par un facteur aléatoire x0.5 - x15.
+
+        Renvoie None si la mise est refusée (le message d'erreur est envoyé ici).
+        Le bypass admin ignore plafond, accès et minimum.
+        """
+        if bypass:
+            return 1.0
+
+        if self._is_vip_channel(ctx):
+            vip_role_id = settings.vip_casino_role_id
+            if vip_role_id:
+                roles = getattr(ctx.author, "roles", []) or []
+                if not any(str(role.id) == str(vip_role_id) for role in roles):
+                    await ctx.send("⛔ L'étage VIP est réservé aux membres ayant le rôle VIP.")
+                    return None
+            capital = await self._capital(session, ctx.guild.id, ctx.author.id)
+            if capital < VIP_REQUIRED_CAPITAL:
+                await ctx.send(
+                    f"⛔ Étage VIP réservé aux capitaux d'au moins **{VIP_REQUIRED_CAPITAL:,} credits**"
+                    f" (portefeuille + banque). Ton capital : **{capital:,}**."
+                )
+                return None
+            if mise < VIP_MIN_BET:
+                await ctx.send(f"❌ Mise minimum à l'étage VIP : **{VIP_MIN_BET:,} credits**.")
+                return None
+            if mise > VIP_MAX_BET:
+                await ctx.send(f"❌ Mise maximum à l'étage VIP : **{VIP_MAX_BET:,} credits**.")
+                return None
+            return random.uniform(VIP_MULTIPLIER_MIN, VIP_MULTIPLIER_MAX)
+
+        if mise > MAX_BET:
+            await ctx.send(f"❌ Mise maximum : **{MAX_BET:,} credits** (au-delà, direction l'étage VIP).")
+            return None
+        return 1.0
+
     @commands.command(name="coinflip")
     async def coinflip(self, ctx: commands.Context, mise: int, choix: str = "pile", *args: str) -> None:
         wants_bypass = "bypass" in args
@@ -99,10 +182,15 @@ class CasinoCog(commands.Cog):
             if not bypass and bal < mise:
                 await ctx.send(f"❌ Solde insuffisant ({bal:,} credits).")
                 return
+            vip_multiplier = await self._bet_guard(ctx, session, mise, bypass)
+            if vip_multiplier is None:
+                return
             result = random.choice(["pile", "face"])
             win = result == choix
             gain = 2 * mise if win else 0
-            new_bal, gain, notes = await self._settle(session, guild_id, ctx.author.id, mise, gain, bypass)
+            new_bal, gain, notes = await self._settle(
+                session, guild_id, ctx.author.id, mise, gain, bypass, multiplier=vip_multiplier
+            )
             await record_casino_result(session, guild_id, ctx.author.id, mise, gain, win, False)
             await session.commit()
 
@@ -132,10 +220,15 @@ class CasinoCog(commands.Cog):
             if not bypass and bal < mise:
                 await ctx.send(f"❌ Solde insuffisant ({bal:,} credits).")
                 return
+            vip_multiplier = await self._bet_guard(ctx, session, mise, bypass)
+            if vip_multiplier is None:
+                return
             s1, s2, s3 = random.choices(SYMBOLS, weights=WEIGHTS, k=3)
             gain, msg = calc_slots(s1, s2, s3, mise)
             win = gain > 0
-            new_bal, gain, notes = await self._settle(session, guild_id, ctx.author.id, mise, gain, bypass)
+            new_bal, gain, notes = await self._settle(
+                session, guild_id, ctx.author.id, mise, gain, bypass, multiplier=vip_multiplier
+            )
             await record_casino_result(session, guild_id, ctx.author.id, mise, gain, win, False)
             await session.commit()
 
@@ -169,10 +262,15 @@ class CasinoCog(commands.Cog):
             if not bypass and bal < mise:
                 await ctx.send(f"❌ Solde insuffisant ({bal:,} credits).")
                 return
+            vip_multiplier = await self._bet_guard(ctx, session, mise, bypass)
+            if vip_multiplier is None:
+                return
             rolled = random.randint(1, 6)
             gain, msg = calc_dice(guess, rolled, mise)
             win = gain > 0
-            new_bal, gain, notes = await self._settle(session, guild_id, ctx.author.id, mise, gain, bypass)
+            new_bal, gain, notes = await self._settle(
+                session, guild_id, ctx.author.id, mise, gain, bypass, multiplier=vip_multiplier
+            )
             await record_casino_result(session, guild_id, ctx.author.id, mise, gain, win, False)
             await session.commit()
 
@@ -207,10 +305,15 @@ class CasinoCog(commands.Cog):
             if not bypass and bal < mise:
                 await ctx.send(f"❌ Solde insuffisant ({bal:,} credits).")
                 return
+            vip_multiplier = await self._bet_guard(ctx, session, mise, bypass)
+            if vip_multiplier is None:
+                return
             rolled_number = random.randint(0, 36)
             gain, msg = calc_roulette(couleur, rolled_number, mise)
             win = gain > 0
-            new_bal, gain, notes = await self._settle(session, guild_id, ctx.author.id, mise, gain, bypass)
+            new_bal, gain, notes = await self._settle(
+                session, guild_id, ctx.author.id, mise, gain, bypass, multiplier=vip_multiplier
+            )
             await record_casino_result(session, guild_id, ctx.author.id, mise, gain, win, False)
             await session.commit()
 
@@ -240,6 +343,9 @@ class CasinoCog(commands.Cog):
             bal = await self._get_balance(session, guild_id, ctx.author.id)
             if not bypass and bal < mise:
                 await ctx.send(f"❌ Solde insuffisant ({bal:,} credits).")
+                return
+            vip_multiplier = await self._bet_guard(ctx, session, mise, bypass)
+            if vip_multiplier is None:
                 return
 
             rng = random.Random()
@@ -273,7 +379,9 @@ class CasinoCog(commands.Cog):
             multiplier, msg = calc_blackjack_outcome(player_total, dealer_total)
             gain = int(mise * multiplier)
             is_win = gain > 0 if multiplier != 1.0 else False
-            new_bal, gain, notes = await self._settle(session, guild_id, ctx.author.id, mise, gain, bypass)
+            new_bal, gain, notes = await self._settle(
+                session, guild_id, ctx.author.id, mise, gain, bypass, multiplier=vip_multiplier
+            )
             await record_casino_result(session, guild_id, ctx.author.id, mise, gain, is_win, False)
             await session.commit()
 
@@ -305,6 +413,9 @@ class CasinoCog(commands.Cog):
             bal = await self._get_balance(session, guild_id, ctx.author.id)
             if not bypass and bal < mise:
                 await ctx.send(f"❌ Solde insuffisant ({bal:,} credits).")
+                return
+            vip_multiplier = await self._bet_guard(ctx, session, mise, bypass)
+            if vip_multiplier is None:
                 return
 
             chance_boost = await get_active_multiplier(session, guild_id, ctx.author.id, "casino_jackpot_chance_boost")
@@ -357,12 +468,17 @@ class CasinoCog(commands.Cog):
             if not bypass and bal < mise:
                 await ctx.send(f"❌ Solde insuffisant ({bal:,} credits).")
                 return
+            vip_multiplier = await self._bet_guard(ctx, session, mise, bypass)
+            if vip_multiplier is None:
+                return
             rng = random.Random()
             first_card = roll_highlow_card(rng)
             next_card = roll_highlow_card(rng)
             gain, msg = calc_highlow(first_card, guess, next_card, mise)
             win = gain > 0
-            new_bal, gain, notes = await self._settle(session, guild_id, ctx.author.id, mise, gain, bypass)
+            new_bal, gain, notes = await self._settle(
+                session, guild_id, ctx.author.id, mise, gain, bypass, multiplier=vip_multiplier
+            )
             await record_casino_result(session, guild_id, ctx.author.id, mise, gain, win, False)
             await session.commit()
 
@@ -394,12 +510,17 @@ class CasinoCog(commands.Cog):
             if not bypass and bal < mise:
                 await ctx.send(f"❌ Solde insuffisant ({bal:,} credits).")
                 return
+            vip_multiplier = await self._bet_guard(ctx, session, mise, bypass)
+            if vip_multiplier is None:
+                return
             rng = random.Random()
             hand = draw_poker_hand(rng)
             category = evaluate_poker_hand(hand)
             gain, msg = calc_poker(category, mise)
             win = gain > 0
-            new_bal, gain, notes = await self._settle(session, guild_id, ctx.author.id, mise, gain, bypass)
+            new_bal, gain, notes = await self._settle(
+                session, guild_id, ctx.author.id, mise, gain, bypass, multiplier=vip_multiplier
+            )
             await record_casino_result(session, guild_id, ctx.author.id, mise, gain, win, False)
             await session.commit()
 
@@ -432,10 +553,15 @@ class CasinoCog(commands.Cog):
             if not bypass and bal < mise:
                 await ctx.send(f"❌ Solde insuffisant ({bal:,} credits).")
                 return
+            vip_multiplier = await self._bet_guard(ctx, session, mise, bypass)
+            if vip_multiplier is None:
+                return
             rng = random.Random()
             gain, msg = calc_wheel(rng, mise)
             win = gain > 0
-            new_bal, gain, notes = await self._settle(session, guild_id, ctx.author.id, mise, gain, bypass)
+            new_bal, gain, notes = await self._settle(
+                session, guild_id, ctx.author.id, mise, gain, bypass, multiplier=vip_multiplier
+            )
             await record_casino_result(session, guild_id, ctx.author.id, mise, gain, win, False)
             await session.commit()
 
@@ -470,11 +596,16 @@ class CasinoCog(commands.Cog):
             if not bypass and bal < mise:
                 await ctx.send(f"❌ Solde insuffisant ({bal:,} credits).")
                 return
+            vip_multiplier = await self._bet_guard(ctx, session, mise, bypass)
+            if vip_multiplier is None:
+                return
             rng = random.Random()
             d1, d2 = roll_craps_dice(rng)
             gain, msg = calc_craps(d1, d2, guess, mise)
             win = gain > 0
-            new_bal, gain, notes = await self._settle(session, guild_id, ctx.author.id, mise, gain, bypass)
+            new_bal, gain, notes = await self._settle(
+                session, guild_id, ctx.author.id, mise, gain, bypass, multiplier=vip_multiplier
+            )
             await record_casino_result(session, guild_id, ctx.author.id, mise, gain, win, False)
             await session.commit()
 

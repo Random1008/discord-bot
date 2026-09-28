@@ -11,7 +11,9 @@ class MarketItem(Base):
     key: Mapped[str] = mapped_column(String(50), nullable=False)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     description: Mapped[str] = mapped_column(String(255), nullable=False)
-    price: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # BIGINT : les objets premium (accès Casino VIP à 10 Md) dépassent la limite
+    # d'un INTEGER 32 bits (2 147 483 647).
+    price: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     item_type: Mapped[str] = mapped_column(String(20), nullable=False)
     item_value: Mapped[str | None] = mapped_column(String(50), nullable=True)
     guild_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)

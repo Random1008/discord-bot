@@ -4,6 +4,7 @@ from sqlalchemy import and_, func, select
 
 from models.economy import Economy
 from models.levels import Level
+from models.rpg import RpgPlayerStats
 from models.stats import MessageStat, VoiceStat
 from models.users import User
 
@@ -69,3 +70,21 @@ async def get_voice_leaderboard(session, guild_id: int, limit: int = 10) -> list
         .limit(limit)
     )
     return [LeaderboardEntry(user_id=row[0], username=row[1], score=int(row[2])) for row in result.all()]
+
+
+async def get_tour_leaderboard(session, guild_id: int, limit: int = 10) -> list[LeaderboardEntry]:
+    """Classement de la Tour RPG : étage le plus haut atteint par joueur.
+
+    Les joueurs qui n'ont jamais dépassé l'étage 0 sont exclus (sinon le
+    classement serait noyé sous les zéros)."""
+    result = await session.execute(
+        select(User.user_id, User.username, RpgPlayerStats.floor_reached_max)
+        .join(
+            RpgPlayerStats,
+            and_(RpgPlayerStats.user_id == User.user_id, RpgPlayerStats.guild_id == User.guild_id),
+        )
+        .where(User.guild_id == guild_id, RpgPlayerStats.floor_reached_max > 0)
+        .order_by(RpgPlayerStats.floor_reached_max.desc(), RpgPlayerStats.tower_xp.desc())
+        .limit(limit)
+    )
+    return [LeaderboardEntry(user_id=row[0], username=row[1], score=row[2]) for row in result.all()]

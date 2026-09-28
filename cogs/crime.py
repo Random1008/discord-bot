@@ -6,7 +6,7 @@ from discord.ext import commands
 
 from models.economy import Economy
 from services.admin_permission import can_bypass
-from services.economy import add_balance
+from services.economy import add_balance, get_total_capital, theft_success_chance
 from shared.db import services as shared_services
 from services.users import get_or_create_user
 
@@ -136,7 +136,11 @@ class CrimeCog(commands.Cog):
                 return
 
             await shared_services.set_economy_cooldown(session, guild_id, ctx.author.id, "last_rob_at", datetime.now(timezone.utc))
-            if random.random() < ROB_SUCCESS_CHANCE:
+            # Plus la cible est riche par rapport au voleur, plus le vol est dur.
+            thief_capital = await get_total_capital(session, guild_id, ctx.author.id)
+            target_capital = await get_total_capital(session, guild_id, target.id)
+            success_chance = theft_success_chance(ROB_SUCCESS_CHANCE, thief_capital, target_capital)
+            if random.random() < success_chance:
                 pct = random.uniform(0.10, 0.30)
                 stolen = max(1, int(target_bal * pct))
                 await add_balance(session, guild_id, target.id, -stolen)

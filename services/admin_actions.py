@@ -1,17 +1,24 @@
 import random
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 
 from models.active_effects import ActiveEffect
 from models.badges import UserBadge
 from models.casino import CasinoStats
+from models.cosmetic_rewards import UserCosmeticReward
 from models.daily_streak import DailyStreak
 from models.economy import Economy
 from models.gacha import GachaCharacter, GachaHistoryEntry, GachaState, GachaWishlist
 from models.inventory import UserItem
+from models.invest import InvestDaily
+from models.keys import UserKey
 from models.levels import Level
 from models.market import MarketItem
+from models.prestiges import Prestige
+from models.quests import UserQuest
 from models.rewards import Reward
+from models.stats import MessageStat, VoiceStat
+from models.users import User
 from models.rpg import (
     RpgBossDefeated,
     RpgCodexVisit,
@@ -24,6 +31,7 @@ from models.rpg import (
     RpgTitle,
     RpgUnlockedAchievement,
 )
+from services.casino import reset_jackpot
 from services.leveling import get_or_create_level, xp_for_level
 from services.rewards import RewardOutcome, grant_reward
 
@@ -44,6 +52,88 @@ RPG_MODELS = (
     RpgBossDefeated,
 )
 GACHA_MODELS = (GachaState, GachaCharacter, GachaHistoryEntry, GachaWishlist)
+
+# Tables vidées par `.reset everything` (TOUS les joueurs de la guilde).
+# Volontairement EXCLUS :
+#   - `users` / `economy` : les lignes sont CONSERVÉES et remises à zéro (les
+#     autres bots de l'écosystème pointent vers `shared.users` — les supprimer
+#     casserait leurs clés étrangères) ;
+#   - `admin_permissions` / `bot_blocked_users` : état de modération, pas de la
+#     progression (sinon il faudrait tout regrant à la main après le reset) ;
+#   - tables de guilde (boutique, cagnotte, index d'investissement, salons sans
+#     XP) : traitées à part.
+EVERYTHING_DELETE_MODELS = (
+    ActiveEffect,
+    UserBadge,
+    UserCosmeticReward,
+    CasinoStats,
+    DailyStreak,
+    UserItem,
+    InvestDaily,
+    UserKey,
+    Prestige,
+    UserQuest,
+    VoiceStat,
+    MessageStat,
+    *GACHA_MODELS,
+    *RPG_MODELS,
+)
+
+
+async def count_guild_players(session, guild_id: int) -> int:
+    """Nombre de joueurs connus du bot sur la guilde (lignes `shared.users`)."""
+    result = await session.execute(
+        select(func.count()).select_from(User).where(User.guild_id == guild_id)
+    )
+    return int(result.scalar_one())
+
+
+async def reset_everything(session, guild_id: int) -> dict[str, int]:
+    """Efface TOUTE la progression de TOUS les joueurs de la guilde.
+
+    Supprime les lignes par joueur (Tour RPG, gacha **et clés gacha**, badges,
+    inventaire, casino, effets actifs, séries quotidiennes, quêtes, prestiges,
+    investissements, stats messages/vocal), remet à zéro les portefeuilles et la
+    progression de niveau, puis remet le compteur du jackpot à zéro.
+
+    Les lignes `users` et `economy` sont conservées (voir
+    EVERYTHING_DELETE_MODELS) : le joueur existe toujours, il repart juste de
+    zéro. Retourne le nombre de lignes supprimées par table.
+    """
+    counts: dict[str, int] = {}
+    for model in EVERYTHING_DELETE_MODELS:
+        result = await session.execute(delete(model).where(model.guild_id == guild_id))
+        counts[model.__tablename__] = int(result.rowcount or 0)
+
+    economies = (
+        await session.execute(select(Economy).where(Economy.guild_id == guild_id))
+    ).scalars().all()
+    for economy in economies:
+        economy.balance = 0
+        economy.bank_balance = 0
+        economy.last_daily_at = None
+        economy.last_work_at = None
+        economy.last_weekly_at = None
+        economy.last_monthly_at = None
+        economy.last_crime_at = None
+        economy.last_rob_at = None
+        economy.prison_until = None
+    counts["economy (remis à zéro)"] = len(economies)
+
+    levels = (
+        await session.execute(select(Level).where(Level.guild_id == guild_id))
+    ).scalars().all()
+    for level_row in levels:
+        level_row.xp = 0
+        level_row.level = 0
+        level_row.prestige = 0
+        level_row.last_key_drop_level = 0
+    counts["levels (remis à zéro)"] = len(levels)
+
+    await reset_jackpot(session, guild_id)
+    counts["casino_jackpot (remis à zéro)"] = 1
+    await session.flush()
+    return counts
 
 
 async def set_level(session, guild_id: int, user_id: int, level: int) -> Level:
