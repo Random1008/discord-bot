@@ -9,7 +9,7 @@ Développé en Python, SQLAlchemy 2 (async) et PostgreSQL.
 - **Casino & jeu** : blackjack, high-low, poker, machine à sous, tournois, et un **étage VIP** (salon dédié, mises de 1 M à 1 Md, multiplicateur de gain aléatoire x0.5 à x15) dont l'accès s'achète en boutique pour 10Md et se verrouille côté bot : sans le rôle VIP, impossible d'écrire ou de lancer une commande dans le salon VIP, administrateurs compris (`.vipguard` pour (re)poser les permissions du salon, `.vipaudit` pour purger les rôles obtenus sans achat)
 - **Progression** : XP et niveaux (`!rank`, `!level`), rôles récompenses par paliers, prestiges, séries quotidiennes (streaks), succès/badges
 - **Profil & classements** : cartes de profil, classements hebdomadaires avec rôles (roi du chat, maître du vocal, plus riche…)
-- **RPG / Tour** : tour de donjon, équipement, butin, inventaire, objets cosmétiques, gacha
+- **RPG / Tour** : tour de donjon, équipement, butin, inventaire, objets cosmétiques, gacha — chaque joueur joue dans **son salon privé** (`tower-of-<pseudo>`, visible par lui et les admins, lui seul peut y écrire), ouvert par le bouton du panneau `.setup tower`
 - **Justice IA** : procès animés par un juge IA (DeepSeek), dépôt de plainte, jurés
 - **Suggestions IA** : `!suggest` avec entretien de clarification par IA et validation à deux
 - **Modération & anti-abus** : garde anti-aliases, anti-spam, journal des commandes, whitelist de permissions admin (`.permadd`)

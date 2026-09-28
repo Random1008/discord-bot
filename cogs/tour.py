@@ -137,11 +137,289 @@ async def _get_or_create_tower_channel(guild: discord.Guild, member) -> discord.
         return None
 
 
+# ------------------------------------------------------- salon privé de la Tour
+# Un salon de la Tour (tower-of-<pseudo>, dans settings.tour_category_id) est
+# privé : seul son joueur le VOIT et y ÉCRIT. Les admins le voient (ils
+# contournent les permissions Discord) mais leurs messages y sont supprimés
+# automatiquement — comme ceux de n'importe quel autre membre.
+
+TOWER_STARTER_TITLE = "🏰 Ton salon de la Tour"
+TOWER_ACCESS_TITLE = "🏰 Salon de la Tour"
+TOWER_ACCESS_DESCRIPTION = (
+    "Clique sur le bouton ci-dessous pour ouvrir **ton salon privé de la Tour** : "
+    "il est créé dans la catégorie des salons de la Tour, visible par toi et par les "
+    "admins — mais **toi seul peux y écrire** (tout autre message y est supprimé "
+    "automatiquement, admins compris).\n\n"
+    "Le bouton ne périme jamais : tu peux revenir chercher ton salon à tout moment."
+)
+TOWER_STARTER_FIELDS = [
+    (
+        "🎮 La Tour",
+        "Utilise les boutons ci-dessous : **Entrer** (lancer ou reprendre ta run), "
+        "**Or**, **Codex**, **Équipement**, **Abandonner**.",
+    ),
+    ("🎒 Inventaire", "`$inventory` — tes objets et tes clés · `!effects` — tes effets actifs"),
+    ("💰 Argent", "`$balance` · `$bank` · `$daily` · `$work` · `$pay @membre <montant>`"),
+    ("🛒 Boutique", "`$shop` — ce qui est en vente · `$buy <id>` — acheter · `$sell <id>` — revendre"),
+    ("📈 Progression", "`!profile` · `!quest` · `!leaderboard tour` — l'ascension des autres joueurs"),
+    ("❓ Le reste", "`!help` — toutes les commandes du bot"),
+]
+
+
+def _is_tower_channel(channel) -> bool:
+    """Vrai pour un salon de la Tour : nom `tower-of-…` dans la catégorie dédiée.
+
+    Le nom est le vrai discriminant : la catégorie contient aussi des salons
+    publics qui ne doivent surtout pas être touchés par le ménage des messages.
+    """
+    name = getattr(channel, "name", "") or ""
+    if not name.startswith("tower-of-"):
+        return False
+    category = getattr(channel, "category", None)
+    if category is None:
+        return True
+    return str(getattr(category, "id", "")) == str(settings.tour_category_id or "")
+
+
+def _tower_overwrites(guild: discord.Guild, member) -> dict:
+    """Surcharges d'un salon de la Tour : le joueur (et le bot), personne d'autre."""
+    overwrites: dict = {
+        guild.default_role: discord.PermissionOverwrite(view_channel=False),
+        member: discord.PermissionOverwrite(
+            view_channel=True,
+            send_messages=True,
+            read_message_history=True,
+            attach_files=True,
+            embed_links=True,
+            add_reactions=True,
+            use_external_emojis=True,
+        ),
+    }
+    bot_member = getattr(guild, "me", None)
+    if bot_member is not None:
+        overwrites[bot_member] = discord.PermissionOverwrite(
+            view_channel=True,
+            send_messages=True,
+            read_message_history=True,
+            manage_messages=True,
+            manage_channels=True,
+            embed_links=True,
+            attach_files=True,
+            add_reactions=True,
+        )
+    return overwrites
+
+
+def _tower_channel_owner(channel) -> int | None:
+    """Joueur propriétaire du salon, déduit de ses surcharges (aucun stockage)."""
+    guild = getattr(channel, "guild", None)
+    bot_id = getattr(getattr(guild, "me", None), "id", None)
+    for target, overwrite in (getattr(channel, "overwrites", None) or {}).items():
+        if not isinstance(target, discord.Member):
+            continue
+        if getattr(target, "id", None) == bot_id:
+            continue
+        if getattr(overwrite, "view_channel", None) is True:
+            return target.id
+    return None
+
+
+def _tower_channel_member(guild, channel):
+    """Membre dont le salon porte le nom (repli : propriétaire des surcharges)."""
+    if guild is None:
+        return None
+    name = getattr(channel, "name", "") or ""
+    for member in getattr(guild, "members", None) or []:
+        if _tower_channel_name(member) == name:
+            return member
+    owner_id = _tower_channel_owner(channel)
+    if owner_id is not None:
+        getter = getattr(guild, "get_member", None)
+        if callable(getter):
+            return getter(owner_id)
+    return None
+
+
+async def _apply_tower_privacy(channel, guild: discord.Guild, member) -> bool:
+    """(Re)pose les surcharges privées du salon (idempotent)."""
+    try:
+        for target, overwrite in _tower_overwrites(guild, member).items():
+            await channel.set_permissions(
+                target, overwrite=overwrite, reason="Salon privé de la Tour"
+            )
+    except (discord.Forbidden, discord.HTTPException):
+        logger.warning("Surcharges du salon %s non appliquées", getattr(channel, "name", "?"))
+        return False
+    return True
+
+
+async def ensure_tower_channel(guild: discord.Guild, member, *, private: bool = True):
+    """Salon de la Tour du joueur : récupéré s'il existe, créé sinon."""
+    channel = _find_tower_channel(guild, member)
+    if channel is not None:
+        if private:
+            await _apply_tower_privacy(channel, guild, member)
+        return channel
+    category = _tower_category(guild)
+    if category is None:
+        return None
+    try:
+        if private:
+            channel = await category.create_text_channel(
+                _tower_channel_name(member),
+                overwrites=_tower_overwrites(guild, member),
+                reason="Salon privé de la Tour",
+            )
+        else:
+            channel = await category.create_text_channel(_tower_channel_name(member))
+    except (discord.Forbidden, discord.HTTPException):
+        logger.warning("Création du salon de la Tour impossible pour %s", member)
+        return None
+    return channel
+
+
+def build_tower_access_embed() -> discord.Embed:
+    """Panneau posté par `.setup tower` (bouton d'accès au salon privé)."""
+    embed = discord.Embed(
+        title=TOWER_ACCESS_TITLE,
+        description=TOWER_ACCESS_DESCRIPTION,
+        color=discord.Color.dark_teal(),
+    )
+    embed.add_field(
+        name="Dans ton salon",
+        value="\n".join(f"• {name} — {value}" for name, value in TOWER_STARTER_FIELDS),
+        inline=False,
+    )
+    return embed
+
+
+def build_tower_starter_embed(member) -> discord.Embed:
+    """Message d'accueil posté une fois au début de chaque salon de la Tour."""
+    mention = getattr(member, "mention", None) or "Bienvenue"
+    embed = discord.Embed(
+        title=TOWER_STARTER_TITLE,
+        description=(
+            f"{mention}, ce salon est **privé** : toi et les admins pouvez le voir, "
+            "mais toi seul peux y écrire — tout autre message y est supprimé "
+            "automatiquement."
+        ),
+        color=discord.Color.dark_teal(),
+    )
+    for name, value in TOWER_STARTER_FIELDS:
+        embed.add_field(name=name, value=value, inline=False)
+    return embed
+
+
+async def post_tower_starter(channel, cog: "TourCog | None" = None) -> bool:
+    """Poste le message d'accueil (une seule fois : repéré par un épinglage)."""
+    try:
+        pinned = await channel.pins()
+    except (discord.Forbidden, discord.HTTPException, AttributeError):
+        pinned = []
+    for message in pinned:
+        for embed in getattr(message, "embeds", []) or []:
+            if getattr(embed, "title", None) == TOWER_STARTER_TITLE:
+                return False
+    member = _tower_channel_member(getattr(channel, "guild", None), channel)
+    message = await channel.send(
+        embed=build_tower_starter_embed(member),
+        view=TourPanelView(cog) if cog is not None else None,
+    )
+    try:
+        await message.pin()
+    except (discord.Forbidden, discord.HTTPException, AttributeError):
+        pass
+    return True
+
+
+async def sync_tower_channels(guild: discord.Guild, cog: "TourCog | None" = None) -> int:
+    """Privatise les salons de la Tour déjà existants et pose leur accueil."""
+    category = _tower_category(guild)
+    if category is None:
+        return 0
+    updated = 0
+    for channel in getattr(category, "text_channels", None) or []:
+        if not _is_tower_channel(channel):
+            continue
+        member = _tower_channel_member(guild, channel)
+        if member is None:
+            continue
+        await _apply_tower_privacy(channel, guild, member)
+        await post_tower_starter(channel, cog)
+        updated += 1
+    return updated
+
+
+class TowerAccessView(discord.ui.View):
+    """Bouton du panneau `.setup tower` : ouvre le salon privé du joueur.
+
+    `timeout=None` + `custom_id` fixe + `bot.add_view` au chargement du cog =
+    bouton immortel, qui survit aux redémarrages du bot.
+    """
+
+    def __init__(self, cog: "TourCog | None") -> None:
+        super().__init__(timeout=None)
+        self.cog = cog
+
+    @discord.ui.button(
+        label="Ouvrir mon salon", emoji="🏰", style=discord.ButtonStyle.primary, custom_id="tower:ouvrir_salon"
+    )
+    async def open_channel(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        if interaction.guild is None:
+            await interaction.response.send_message("Commande réservée au serveur.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        channel = await ensure_tower_channel(interaction.guild, interaction.user)
+        if channel is None:
+            await interaction.followup.send(
+                "❌ Je n'ai pas pu ouvrir ton salon : catégorie de la Tour configurée dans `.config`, "
+                "ou permission « Gérer les salons » manquante.",
+                ephemeral=True,
+            )
+            return
+        await post_tower_starter(channel, self.cog)
+        await interaction.followup.send(
+            f"🏰 Ton salon privé : {channel.mention} — il n'est visible que par toi et les admins.",
+            ephemeral=True,
+        )
+
+
 class TourCog(TourCombatMixin, commands.Cog):
     def __init__(self, bot) -> None:
         self.bot = bot
         self.active_runs: dict[int, object] = {}
         self.tasks: dict[int, asyncio.Task] = {}
+
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message) -> None:
+        """Salon de la Tour : seul son joueur peut y écrire.
+
+        Les admins VOIENT ces salons (ils ont ADMINISTRATOR, qui contourne les
+        permissions Discord) mais n'y écrivent pas : tout message d'un autre
+        membre — admin ou non — est supprimé automatiquement.
+        """
+        if getattr(message, "guild", None) is None:
+            return
+        author = getattr(message, "author", None)
+        if author is None or getattr(author, "bot", False):
+            return
+        channel = getattr(message, "channel", None)
+        if not _is_tower_channel(channel):
+            return
+        owner_id = _tower_channel_owner(channel)
+        if owner_id is None:
+            owner = _tower_channel_member(message.guild, channel)
+            owner_id = getattr(owner, "id", None)
+        if owner_id is None:
+            # Salon non identifié : on ne supprime rien plutôt que de risquer
+            # de rendre un salon muet pour tout le monde.
+            return
+        if getattr(author, "id", None) == owner_id:
+            return
+        try:
+            await message.delete()
+        except (discord.Forbidden, discord.HTTPException):
+            logger.warning("Message non supprimé dans %s", getattr(channel, "name", "?"))
 
     def _session(self):
         return self.bot.session_factory()
@@ -1142,7 +1420,7 @@ class TourPanelView(discord.ui.View):
         super().__init__(timeout=None)
         self.cog = cog
 
-    @discord.ui.button(label="Entrer", emoji="🏰", style=discord.ButtonStyle.primary)
+    @discord.ui.button(label="Entrer", emoji="🏰", style=discord.ButtonStyle.primary, custom_id="tower:entrer")
     async def _enter(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         guild_id = interaction.guild.id
         user_id = interaction.user.id
@@ -1154,14 +1432,14 @@ class TourPanelView(discord.ui.View):
         ctx = _InteractionContext(interaction, target_channel=channel)
         asyncio.create_task(self.cog._run_tour_flow(ctx, guild_id, user_id))
 
-    @discord.ui.button(label="Abandonner", emoji="🏳️", style=discord.ButtonStyle.danger)
+    @discord.ui.button(label="Abandonner", emoji="🏳️", style=discord.ButtonStyle.danger, custom_id="tower:abandonner")
     async def _abandon(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await interaction.response.defer(ephemeral=True)
         channel = _find_tower_channel(interaction.guild, interaction.user)
         ctx = _InteractionContext(interaction, target_channel=channel)
         await self.cog._do_abandon(ctx, interaction.guild.id, interaction.user.id)
 
-    @discord.ui.button(label="Or", emoji="💰", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="Or", emoji="💰", style=discord.ButtonStyle.secondary, custom_id="tower:or")
     async def _or(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         guild_id = interaction.guild.id
         user_id = interaction.user.id
@@ -1170,14 +1448,14 @@ class TourPanelView(discord.ui.View):
             f"💰 Tu as **{balance}** Or.", ephemeral=True, view=_OrView(self.cog, guild_id, user_id)
         )
 
-    @discord.ui.button(label="Codex", emoji="📖", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="Codex", emoji="📖", style=discord.ButtonStyle.secondary, custom_id="tower:codex")
     async def _codex(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await interaction.response.defer(ephemeral=True)
         channel = _find_tower_channel(interaction.guild, interaction.user)
         ctx = _InteractionContext(interaction, target_channel=channel)
         await self.cog._show_codex(ctx, interaction.guild.id, interaction.user.id)
 
-    @discord.ui.button(label="Équipement", emoji="🗡️", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="Équipement", emoji="🗡️", style=discord.ButtonStyle.secondary, custom_id="tower:equipement")
     async def _equip(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await interaction.response.defer(ephemeral=True)
         channel = _find_tower_channel(interaction.guild, interaction.user)
@@ -1186,4 +1464,11 @@ class TourPanelView(discord.ui.View):
 
 
 async def setup(bot) -> None:
-    await bot.add_cog(TourCog(bot))
+    cog = TourCog(bot)
+    await bot.add_cog(cog)
+    # Boutons immortels : le panneau d'accès (`.setup tower`) et le panneau du
+    # salon de la Tour sont ré-enregistrés à CHAQUE démarrage — ils ne périment
+    # donc jamais, y compris après un redémarrage du bot.
+    bot.add_view(TowerAccessView(cog))
+    bot.add_view(TourPanelView(cog))
+    logger.info("Vues persistantes de la Tour enregistrées (panneau d'accès + panneau du salon)")

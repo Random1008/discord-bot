@@ -124,7 +124,7 @@ PLAYER_CATEGORIES = [
         "key": "tour",
         "label": "Tour RPG",
         "emoji": "🗼",
-        "description": "L'ascension de la tour, 100 étages, boss, équipement persistant, titres et classes à débloquer — pilotée par des boutons, dans ton salon tower-of-<toi>.",
+        "description": "L'ascension de la tour, 100 étages, boss, équipement persistant, titres et classes à débloquer — pilotée par des boutons, dans TON salon privé `tower-of-<toi>` (visible par toi et les admins, mais toi seul peux y écrire ; il s'ouvre avec le bouton du panneau `.setup tower`).",
         "restricted_on_yoru_guild": True,
         "entries": [
             ("!towerof [@membre]", "Voir la fiche Tour d'un joueur (niveau, étage max, équipement, titres, Or...)."),
@@ -173,6 +173,13 @@ ADMIN_CATEGORIES = [
                 "Créer le panneau des procès (embed personnalisable + bouton « Déposer une plainte ») "
                 "envoyé dans le salon configuré via .config. Le bouton « Configurer » permet aussi de "
                 "modifier le règlement du serveur appliqué par le juge IA.",
+            ),
+            (
+                ".setup tower",
+                "Poster le panneau « Salon de la Tour » (bouton immortel) : chaque joueur qui clique "
+                "obtient son salon privé dans la catégorie de la Tour, visible par lui et les admins — "
+                "lui seul peut y écrire (les messages des admins y sont supprimés). Un message "
+                "d'accueil y rappelle les commandes utiles. Remet aussi au propre les salons existants.",
             ),
             (
                 ".proces end",

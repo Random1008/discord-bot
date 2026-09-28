@@ -155,7 +155,9 @@ class SetupCog(commands.Cog):
     @commands.group(name="setup", invoke_without_command=True)
     @commands.has_permissions(administrator=True)
     async def setup_group(self, ctx: commands.Context) -> None:
-        await ctx.send(f"Usage : `{ctx.prefix}setup welcome` · `{ctx.prefix}setup proces`")
+        await ctx.send(
+            f"Usage : `{ctx.prefix}setup welcome` · `{ctx.prefix}setup proces` · `{ctx.prefix}setup tower`"
+        )
 
     @setup_group.command(name="welcome")
     @commands.has_permissions(administrator=True)
@@ -180,6 +182,28 @@ class SetupCog(commands.Cog):
             embed=build_proces_embed(config),
             view=ProcesSetupView(self, author_id=ctx.author.id),
         )
+
+    @setup_group.command(name="tower")
+    @commands.has_permissions(administrator=True)
+    async def setup_tower(self, ctx: commands.Context) -> None:
+        """Poste le panneau « Salon de la Tour » (bouton d'accès immortel).
+
+        Le bouton ouvre au joueur son salon privé (tower-of-<pseudo>, catégorie
+        configurée via `.config` → Salon de la Tour) : visible par lui et les
+        admins, mais lui seul peut y écrire. La commande remet aussi au propre
+        les salons déjà existants.
+        """
+        from cogs.tour import TowerAccessView, build_tower_access_embed, sync_tower_channels
+
+        tour_cog = self.bot.get_cog("TourCog")
+        await ctx.send(embed=build_tower_access_embed(), view=TowerAccessView(tour_cog))
+
+        updated = await sync_tower_channels(ctx.guild, tour_cog)
+        if updated:
+            await ctx.send(
+                f"🧹 {updated} salon(s) de la Tour déjà existant(s) mis à jour : **privés** "
+                "(joueur + admins uniquement) et message d'accueil posé s'il manquait."
+            )
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member) -> None:

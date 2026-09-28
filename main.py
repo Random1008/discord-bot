@@ -113,6 +113,7 @@ ADMIN_COMMAND_NAMES = {
     "setup",
     "setup welcome",
     "setup proces",
+    "setup tower",
     "act",
     "bot",
     "bot on",
