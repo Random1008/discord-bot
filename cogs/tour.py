@@ -112,17 +112,43 @@ LEGACY_TOWER_CHANNEL_PREFIXES = ("tower-of-",)
 TOWER_CHANNEL_PREFIXES = (TOWER_CHANNEL_PREFIX, *LEGACY_TOWER_CHANNEL_PREFIXES)
 
 
+def _tower_account_name(member) -> str:
+    """Pseudo du COMPTE, et non le pseudo pris sur le serveur.
+
+    Un membre peut se renommer sur le serveur (« aliciette ») alors que son
+    compte s'appelle « alice » : c'est le pseudo du compte qui nomme le salon.
+    Ordre : pseudo d'affichage du compte (`global_name`), sinon le nom
+    d'utilisateur (`name`), et seulement en dernier recours le pseudo serveur
+    (`display_name`) — utile pour les doublures de test ou les webhooks.
+    """
+    for attribut in ("global_name", "name", "display_name"):
+        valeur = getattr(member, attribut, None)
+        if valeur:
+            return valeur
+    return "joueur"
+
+
 def _tower_channel_name(member) -> str:
-    suffixe = _sanitize_channel_name(member.display_name)
+    suffixe = _sanitize_channel_name(_tower_account_name(member))
     limite = max(1, 100 - len(TOWER_CHANNEL_PREFIX))
     return f"{TOWER_CHANNEL_PREFIX}{suffixe[:limite].strip('-_')}"
 
 
 def _tower_channel_names(member) -> tuple[str, ...]:
-    """Nom actuel + anciens noms acceptés pour retrouver un salon existant."""
-    suffixe = _sanitize_channel_name(member.display_name)
-    anciens = tuple(f"{prefix}{suffixe}" for prefix in LEGACY_TOWER_CHANNEL_PREFIXES)
-    return (_tower_channel_name(member),) + anciens
+    """Nom actuel + anciens noms acceptés pour retrouver un salon existant.
+
+    On accepte aussi le pseudo serveur : un salon créé avant ce changement
+    (nommé d'après le pseudo de serveur) doit rester retrouvable.
+    """
+    pseudos = {_tower_account_name(member), getattr(member, "display_name", None) or ""}
+    noms: list[str] = [_tower_channel_name(member)]
+    for pseudo in pseudos:
+        if not pseudo:
+            continue
+        suffixe = _sanitize_channel_name(pseudo)
+        noms.append(f"{TOWER_CHANNEL_PREFIX}{suffixe}")
+        noms.extend(f"{prefix}{suffixe}" for prefix in LEGACY_TOWER_CHANNEL_PREFIXES)
+    return tuple(dict.fromkeys(noms))
 
 
 def _tower_category(guild: discord.Guild) -> discord.CategoryChannel | None:
