@@ -124,7 +124,7 @@ PLAYER_CATEGORIES = [
         "key": "tour",
         "label": "Tour RPG",
         "emoji": "🗼",
-        "description": "L'ascension de la tour, 100 étages, boss, équipement persistant, titres et classes à débloquer — pilotée par des boutons, dans TON salon privé `tower-of-<toi>` (visible par toi et les admins, mais toi seul peux y écrire ; il s'ouvre avec le bouton du panneau `.setup tower`).",
+        "description": "L'ascension de la tour, 100 étages, boss, équipement persistant, titres et classes à débloquer — pilotée par des boutons, dans TON salon privé `🏰|tower of <toi>` (visible par toi et les admins, mais toi seul peux y écrire ; il s'ouvre avec le bouton du panneau `.setup tower`).",
         "restricted_on_yoru_guild": True,
         "entries": [
             ("!towerof [@membre]", "Voir la fiche Tour d'un joueur (niveau, étage max, équipement, titres, Or...)."),
@@ -271,7 +271,7 @@ ADMIN_CATEGORIES = [
         "description": "Gestion de la Tour RPG : panneau de jeu et étage max atteint.",
         "restricted_on_yoru_guild": False,
         "entries": [
-            (".tourpanel [@membre]", "Poster le panneau de la Tour (avec @membre : dans son salon tower-of-<membre>)."),
+            (".tourpanel [@membre]", "Poster le panneau de la Tour (avec @membre : dans son salon 🏰|tower of <membre>)."),
             (".tower set @membre <étage>", "Fixer l'étage max atteint d'un membre."),
             (".tower add / .tower remove @membre <montant>", "Ajouter/retirer des étages à l'étage max atteint."),
             (".tower reset @membre", "Remettre l'étage max atteint d'un membre à 0."),

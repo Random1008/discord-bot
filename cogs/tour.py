@@ -103,8 +103,26 @@ def _sanitize_channel_name(name: str) -> str:
     return name[:100] or "joueur"
 
 
+# Nom des salons de la Tour : emoji + séparateur + « tower of <pseudo> », comme
+# les autres salons du serveur (🎧│Musique, 🎨│art…). Les anciens salons créés
+# sous l'ancien nom (« tower-of-… ») restent reconnus et sont renommés.
+TOWER_CHANNEL_PREFIX = "🏰|tower of "
+LEGACY_TOWER_CHANNEL_PREFIXES = ("tower-of-",)
+# Préfixes acceptés pour reconnaître un salon de la Tour (nom actuel + anciens).
+TOWER_CHANNEL_PREFIXES = (TOWER_CHANNEL_PREFIX, *LEGACY_TOWER_CHANNEL_PREFIXES)
+
+
 def _tower_channel_name(member) -> str:
-    return f"tower-of-{_sanitize_channel_name(member.display_name)}"
+    suffixe = _sanitize_channel_name(member.display_name)
+    limite = max(1, 100 - len(TOWER_CHANNEL_PREFIX))
+    return f"{TOWER_CHANNEL_PREFIX}{suffixe[:limite].strip('-_')}"
+
+
+def _tower_channel_names(member) -> tuple[str, ...]:
+    """Nom actuel + anciens noms acceptés pour retrouver un salon existant."""
+    suffixe = _sanitize_channel_name(member.display_name)
+    anciens = tuple(f"{prefix}{suffixe}" for prefix in LEGACY_TOWER_CHANNEL_PREFIXES)
+    return (_tower_channel_name(member),) + anciens
 
 
 def _tower_category(guild: discord.Guild) -> discord.CategoryChannel | None:
@@ -121,7 +139,11 @@ def _find_tower_channel(guild: discord.Guild, member) -> discord.TextChannel | N
     category = _tower_category(guild)
     if category is None:
         return None
-    return discord.utils.get(category.text_channels, name=_tower_channel_name(member))
+    noms = set(_tower_channel_names(member))
+    for channel in category.text_channels:
+        if getattr(channel, "name", None) in noms:
+            return channel
+    return None
 
 
 async def _get_or_create_tower_channel(guild: discord.Guild, member) -> discord.TextChannel | None:
@@ -166,6 +188,8 @@ TOWER_ACCESS_HINT = (
     "Toi et l'équipe pouvez le voir, **toi seul peux y écrire** — et tu y retrouveras la "
     "liste des commandes utiles. Le bouton reste ouvert pour toujours."
 )
+# Illustration affichée tout en bas de l'embed (après le texte et les champs).
+TOWER_ACCESS_IMAGE_URL = "https://i.pinimg.com/1200x/32/37/4e/32374e81e48950c4f91dd6290fa7b5e8.jpg"
 TOWER_STARTER_FIELDS = [
     (
         "🚪 Commencer l'ascension",
@@ -181,13 +205,14 @@ TOWER_STARTER_FIELDS = [
 
 
 def _is_tower_channel(channel) -> bool:
-    """Vrai pour un salon de la Tour : nom `tower-of-…` dans la catégorie dédiée.
+    """Vrai pour un salon de la Tour : nom `🏰|tower of …` dans la catégorie dédiée.
 
     Le nom est le vrai discriminant : la catégorie contient aussi des salons
     publics qui ne doivent surtout pas être touchés par le ménage des messages.
+    Les anciens salons « tower-of-… » restent reconnus.
     """
     name = getattr(channel, "name", "") or ""
-    if not name.startswith("tower-of-"):
+    if not name.startswith(TOWER_CHANNEL_PREFIXES):
         return False
     category = getattr(channel, "category", None)
     if category is None:
@@ -244,7 +269,7 @@ def _tower_channel_member(guild, channel):
         return None
     name = getattr(channel, "name", "") or ""
     for member in getattr(guild, "members", None) or []:
-        if _tower_channel_name(member) == name:
+        if name in _tower_channel_names(member):
             return member
     owner_id = _tower_channel_owner(channel)
     if owner_id is not None:
@@ -305,6 +330,7 @@ def build_tower_access_embed() -> discord.Embed:
         color=discord.Color.dark_teal(),
     )
     embed.add_field(name="Ton ascension", value=TOWER_ACCESS_HINT, inline=False)
+    embed.set_image(url=TOWER_ACCESS_IMAGE_URL)
     return embed
 
 
@@ -360,6 +386,14 @@ async def sync_tower_channels(guild: discord.Guild, cog: "TourCog | None" = None
         member = _tower_channel_member(guild, channel)
         if member is None:
             continue
+        if getattr(channel, "name", None) != _tower_channel_name(member):
+            # Ancien nom (tower-of-…) : on le met au nouveau format.
+            try:
+                await channel.edit(
+                    name=_tower_channel_name(member), reason="Nouveau nom des salons de la Tour"
+                )
+            except (discord.Forbidden, discord.HTTPException):
+                logger.warning("Salon %s non renommé", getattr(channel, "name", "?"))
         await _apply_tower_privacy(channel, guild, member)
         await post_tower_starter(channel, cog)
         updated += 1

@@ -188,7 +188,7 @@ class SetupCog(commands.Cog):
     async def setup_tower(self, ctx: commands.Context) -> None:
         """Poste le panneau « Salon de la Tour » (bouton d'accès immortel).
 
-        Le bouton ouvre au joueur son salon privé (tower-of-<pseudo>, catégorie
+        Le bouton ouvre au joueur son salon privé (🏰|tower of <pseudo>, catégorie
         configurée via `.config` → Salon de la Tour) : visible par lui et les
         admins, mais lui seul peut y écrire. La commande remet aussi au propre
         les salons déjà existants.
